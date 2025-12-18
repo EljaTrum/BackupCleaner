@@ -35,6 +35,7 @@ namespace BackupCleaner
             lstCustomers.ItemsSource = _customers;
             
             LoadSettings();
+            IgnoreService.Load(); // Laad ignore patterns
             SetupAutoCleanupTimer();
             SetupSystemTray();
             
@@ -185,8 +186,15 @@ namespace BackupCleaner
             {
                 txtStatus.Text = "Automatische opruiming: scannen...";
                 
-                // Doe eerst een verse scan
-                var directories = await Task.Run(() => Directory.GetDirectories(_settings.BackupFolderPath!));
+                // Herlaad ignore patterns
+                IgnoreService.Load();
+                
+                // Doe eerst een verse scan, filter genegeerde mappen
+                var allDirectories = await Task.Run(() => Directory.GetDirectories(_settings.BackupFolderPath!));
+                var directories = allDirectories
+                    .Where(d => !IgnoreService.ShouldIgnoreFolder(Path.GetFileName(d)))
+                    .ToArray();
+                    
                 var allFilesToDelete = new List<FileToDelete>();
                 long totalSize = 0;
                 var newFolders = new List<string>();
@@ -296,6 +304,31 @@ namespace BackupCleaner
             SelectFolder();
         }
 
+        private void BtnOpenIgnoreFile_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var ignorePath = IgnoreService.GetIgnoreFilePath();
+                
+                // Zorg dat het bestand bestaat (laad indien nodig)
+                if (!File.Exists(ignorePath))
+                {
+                    IgnoreService.Load();
+                }
+                
+                // Open het bestand in de standaard teksteditor
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = ignorePath,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Kon het negeerbestand niet openen: {ex.Message}", "Fout", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void SelectFolder()
         {
             using var dialog = new FolderBrowserDialog
@@ -354,6 +387,9 @@ namespace BackupCleaner
             _scanCancellation = new CancellationTokenSource();
             var cancellationToken = _scanCancellation.Token;
 
+            // Herlaad ignore patterns voor elke scan
+            IgnoreService.Load();
+
             _isScanning = true;
             txtStatus.Text = "Scannen gestart...";
             btnScan.Content = "⏹ Afbreken";
@@ -366,11 +402,16 @@ namespace BackupCleaner
             
             try
             {
-                // Eerst alle directories ophalen
-                var directories = await Task.Run(() => Directory.GetDirectories(backupPath), cancellationToken);
+                // Eerst alle directories ophalen en filter genegeerde mappen
+                var allDirectories = await Task.Run(() => Directory.GetDirectories(backupPath), cancellationToken);
+                var directories = allDirectories
+                    .Where(d => !IgnoreService.ShouldIgnoreFolder(Path.GetFileName(d)))
+                    .ToArray();
+                
+                var ignoredCount = allDirectories.Length - directories.Length;
                 
                 // Check of dit een directe backup map is (geen submappen, maar wel backup bestanden)
-                var isDirectBackupFolder = directories.Length == 0;
+                var isDirectBackupFolder = directories.Length == 0 && allDirectories.Length == 0;
                 if (isDirectBackupFolder)
                 {
                     // Controleer of er backup bestanden in de map staan
@@ -476,9 +517,11 @@ namespace BackupCleaner
                 emptyState.Visibility = _customers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
                 UpdateStats();
                 
+                var ignoredText = ignoredCount > 0 ? $" ({ignoredCount} genegeerd)" : "";
+                
                 if (wasCancelled)
                 {
-                    txtStatus.Text = $"Scan afgebroken - {_customers.Count} map(pen) verwerkt";
+                    txtStatus.Text = $"Scan afgebroken - {_customers.Count} map(pen) verwerkt{ignoredText}";
                 }
                 else if (isDirectBackupFolder)
                 {
@@ -486,7 +529,7 @@ namespace BackupCleaner
                 }
                 else
                 {
-                    txtStatus.Text = $"Scan voltooid - {_customers.Count} klant(en) gevonden";
+                    txtStatus.Text = $"Scan voltooid - {_customers.Count} klant(en) gevonden{ignoredText}";
                 }
             }
             catch (OperationCanceledException)

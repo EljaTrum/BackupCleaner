@@ -69,11 +69,21 @@
                         Margin="0,0,12,0"/>
                 
                 <StackPanel Grid.Column="2" Orientation="Vertical" VerticalAlignment="Center">
-                    <CheckBox x:Name="chkAutoCleanup" 
-                              Content="Automatisch dagelijks opruimen"
-                              Style="{StaticResource ModernCheckBoxStyle}"
-                              Checked="ChkAutoCleanup_Changed"
-                              Unchecked="ChkAutoCleanup_Changed"/>
+                    <StackPanel Orientation="Horizontal">
+                        <CheckBox x:Name="chkAutoCleanup" 
+                                  Content="Automatisch dagelijks opruimen"
+                                  Style="{StaticResource ModernCheckBoxStyle}"
+                                  Checked="ChkAutoCleanup_Changed"
+                                  Unchecked="ChkAutoCleanup_Changed"/>
+                        <Button Content="📝 Negeerlijst" 
+                                Click="BtnOpenIgnoreFile_Click"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Foreground="{StaticResource SecondaryBrush}"
+                                Cursor="Hand"
+                                Margin="16,0,0,0"
+                                ToolTip="Open het bestand met genegeerde mappen/bestanden"/>
+                    </StackPanel>
                     <TextBlock x:Name="txtAutoCleanupInfo" 
                                Text="" 
                                FontSize="12" 

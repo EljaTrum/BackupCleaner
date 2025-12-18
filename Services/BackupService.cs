@@ -57,6 +57,7 @@ namespace BackupCleaner.Services
 
             var files = Directory.GetFiles(customerPath)
                 .Where(f => BackupExtensions.Contains(Path.GetExtension(f).ToLower()))
+                .Where(f => !IgnoreService.ShouldIgnoreFile(Path.GetFileName(f))) // Filter genegeerde bestanden
                 .Select(f => new FileInfo(f))
                 .ToList();
 
