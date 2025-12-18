@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms;
@@ -25,6 +26,7 @@ namespace BackupCleaner
         private bool _isInitialized = false;
         private bool _isScanning = false;
         private NotifyIcon? _notifyIcon;
+        private CancellationTokenSource? _scanCancellation;
 
         public MainWindow()
         {
@@ -36,11 +38,12 @@ namespace BackupCleaner
             SetupAutoCleanupTimer();
             SetupSystemTray();
             
-            // Controleer of de map nog bestaat
+            // Controleer of de map nog bestaat en toon het pad (maar scan niet automatisch)
             if (!string.IsNullOrEmpty(_settings.BackupFolderPath) && Directory.Exists(_settings.BackupFolderPath))
             {
                 txtBackupPath.Text = _settings.BackupFolderPath;
-                ScanFolders();
+                txtStatus.Text = "Druk op 'Scannen' om te beginnen";
+                emptyState.Visibility = Visibility.Visible;
             }
             else if (!string.IsNullOrEmpty(_settings.BackupFolderPath))
             {
@@ -312,13 +315,27 @@ namespace BackupCleaner
                 _settings.BackupFolderPath = dialog.SelectedPath;
                 txtBackupPath.Text = dialog.SelectedPath;
                 SaveSettings();
-                ScanFolders();
+                _customers.Clear();
+                emptyState.Visibility = Visibility.Visible;
+                txtStatus.Text = "Druk op 'Scannen' om te beginnen";
+                txtCustomerCount.Text = "0";
+                txtFilesToDelete.Text = "0 bestanden";
+                txtSpaceToFree.Text = "0 B";
             }
         }
 
         private void BtnScan_Click(object sender, RoutedEventArgs e)
         {
-            ScanFolders();
+            if (_isScanning)
+            {
+                // Annuleer de lopende scan
+                _scanCancellation?.Cancel();
+            }
+            else
+            {
+                // Start een nieuwe scan
+                ScanFolders();
+            }
         }
 
         private async void ScanFolders()
@@ -332,38 +349,82 @@ namespace BackupCleaner
                 return;
             }
 
+            // Maak nieuwe cancellation token
+            _scanCancellation?.Dispose();
+            _scanCancellation = new CancellationTokenSource();
+            var cancellationToken = _scanCancellation.Token;
+
             _isScanning = true;
             txtStatus.Text = "Scannen gestart...";
-            btnScan.IsEnabled = false;
+            btnScan.Content = "⏹ Afbreken";
             btnCleanup.IsEnabled = false;
             _customers.Clear();
             emptyState.Visibility = Visibility.Collapsed;
             
             var backupPath = _settings.BackupFolderPath!;
+            var wasCancelled = false;
             
             try
             {
                 // Eerst alle directories ophalen
-                var directories = await Task.Run(() => Directory.GetDirectories(backupPath));
+                var directories = await Task.Run(() => Directory.GetDirectories(backupPath), cancellationToken);
+                
+                // Check of dit een directe backup map is (geen submappen, maar wel backup bestanden)
+                var isDirectBackupFolder = directories.Length == 0;
+                if (isDirectBackupFolder)
+                {
+                    // Controleer of er backup bestanden in de map staan
+                    var hasBackupFiles = await Task.Run(() => BackupService.GetBackupSets(backupPath).Any(), cancellationToken);
+                    if (!hasBackupFiles)
+                    {
+                        // Geen submappen en geen backup bestanden
+                        txtStatus.Text = "Geen backup bestanden of klantmappen gevonden";
+                        emptyState.Visibility = Visibility.Visible;
+                        return;
+                    }
+                    
+                    // Behandel de gekozen map zelf als een backup map
+                    directories = new[] { backupPath };
+                }
+                
                 var total = directories.Length;
                 var processedCount = 0;
                 long totalSizeToFree = 0;
                 int totalFilesToDelete = 0;
 
-                txtStatus.Text = $"Scannen: 0 van {total} mappen...";
+                txtStatus.Text = isDirectBackupFolder 
+                    ? "Scannen: directe backup map..." 
+                    : $"Scannen: 0 van {total} mappen...";
                 txtCustomerCount.Text = "0";
 
                 foreach (var dir in directories)
                 {
+                    // Check of de scan geannuleerd is
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        wasCancelled = true;
+                        break;
+                    }
+
                     var folderName = Path.GetFileName(dir);
                     
                     // Update status
                     processedCount++;
-                    txtStatus.Text = $"Scannen: {processedCount} van {total} - {folderName}";
+                    if (!isDirectBackupFolder)
+                    {
+                        txtStatus.Text = $"Scannen: {processedCount} van {total} - {folderName}";
+                    }
 
                     // Scan deze map in background thread
-                    var backupSets = await Task.Run(() => BackupService.GetBackupSets(dir));
+                    var backupSets = await Task.Run(() => BackupService.GetBackupSets(dir), cancellationToken);
                     
+                    // Check nogmaals na de Task.Run
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        wasCancelled = true;
+                        break;
+                    }
+
                     var customer = new CustomerFolder
                     {
                         FolderName = folderName,
@@ -414,7 +475,25 @@ namespace BackupCleaner
 
                 emptyState.Visibility = _customers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
                 UpdateStats();
-                txtStatus.Text = $"Scan voltooid - {_customers.Count} klant(en) gevonden";
+                
+                if (wasCancelled)
+                {
+                    txtStatus.Text = $"Scan afgebroken - {_customers.Count} map(pen) verwerkt";
+                }
+                else if (isDirectBackupFolder)
+                {
+                    txtStatus.Text = $"Scan voltooid - directe backup map gescand";
+                }
+                else
+                {
+                    txtStatus.Text = $"Scan voltooid - {_customers.Count} klant(en) gevonden";
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                txtStatus.Text = $"Scan afgebroken - {_customers.Count} klant(en) verwerkt";
+                emptyState.Visibility = _customers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+                UpdateStats();
             }
             catch (Exception ex)
             {
@@ -423,6 +502,7 @@ namespace BackupCleaner
             finally
             {
                 _isScanning = false;
+                btnScan.Content = "🔍 Scannen";
                 btnScan.IsEnabled = true;
                 btnCleanup.IsEnabled = true;
             }
@@ -717,6 +797,7 @@ namespace BackupCleaner
             }
             
             SaveSettings();
+            _scanCancellation?.Dispose();
             _notifyIcon?.Dispose();
             base.OnClosing(e);
         }
