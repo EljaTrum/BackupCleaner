@@ -27,6 +27,11 @@ namespace BackupCleaner
         private bool _isScanning = false;
         private NotifyIcon? _notifyIcon;
         private CancellationTokenSource? _scanCancellation;
+        
+        // Sorteer state
+        private enum SortColumn { None, Klant, Backups, TeVerwijderen, VrijTeMaken }
+        private SortColumn _currentSortColumn = SortColumn.None;
+        private bool _sortAscending = true;
 
         public MainWindow()
         {
@@ -53,7 +58,6 @@ namespace BackupCleaner
             }
             
             _isInitialized = true;
-            UpdateAutoCleanupInfo();
             
             // Check voor command line argument om direct te starten voor scheduled task
             var args = Environment.GetCommandLineArgs();
@@ -127,14 +131,13 @@ namespace BackupCleaner
             _minimumAgeMonths = _settings.MinimumAgeMonths > 0 ? _settings.MinimumAgeMonths : 1;
             txtDefaultKeep.Text = _defaultBackupsToKeep.ToString();
             txtMinAge.Text = _minimumAgeMonths.ToString();
-            chkAutoCleanup.IsChecked = _settings.AutoCleanupEnabled;
         }
 
         private void SaveSettings()
         {
             _settings.DefaultBackupsToKeep = _defaultBackupsToKeep;
             _settings.MinimumAgeMonths = _minimumAgeMonths;
-            _settings.AutoCleanupEnabled = chkAutoCleanup.IsChecked == true;
+            // AutoCleanupEnabled wordt nu beheerd via SettingsWindow
             
             // Bewaar klantinstellingen
             _settings.CustomerSettings.Clear();
@@ -274,7 +277,6 @@ namespace BackupCleaner
 
                 _settings.LastAutoCleanup = DateTime.Now;
                 SaveSettings();
-                UpdateAutoCleanupInfo();
                 
                 // Ververs de UI lijst
                 ScanFolders();
@@ -304,29 +306,33 @@ namespace BackupCleaner
             SelectFolder();
         }
 
-        private void BtnOpenIgnoreFile_Click(object sender, RoutedEventArgs e)
+        private void BtnSettings_Click(object sender, RoutedEventArgs e)
         {
-            try
+            var settingsWindow = new SettingsWindow(_settings);
+            settingsWindow.Owner = this;
+            
+            // Reageer op wijzigingen in auto-cleanup
+            settingsWindow.AutoCleanupChanged += (s, args) =>
             {
-                var ignorePath = IgnoreService.GetIgnoreFilePath();
-                
-                // Zorg dat het bestand bestaat (laad indien nodig)
-                if (!File.Exists(ignorePath))
+                // Update timer
+                if (_autoCleanupTimer != null)
                 {
-                    IgnoreService.Load();
+                    if (_settings.AutoCleanupEnabled)
+                    {
+                        _autoCleanupTimer.Start();
+                    }
+                    else
+                    {
+                        _autoCleanupTimer.Stop();
+                    }
                 }
                 
-                // Open het bestand in de standaard teksteditor
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = ignorePath,
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Kon het negeerbestand niet openen: {ex.Message}", "Fout", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+                // Update scheduled task
+                UpdateScheduledTask();
+                SaveSettings();
+            };
+            
+            settingsWindow.ShowDialog();
         }
 
         private void SelectFolder()
@@ -396,6 +402,7 @@ namespace BackupCleaner
             btnCleanup.IsEnabled = false;
             _customers.Clear();
             emptyState.Visibility = Visibility.Collapsed;
+            ResetSortState(); // Reset sortering bij nieuwe scan
             
             var backupPath = _settings.BackupFolderPath!;
             var wasCancelled = false;
@@ -675,60 +682,6 @@ namespace BackupCleaner
             SaveSettings();
         }
 
-        private void ChkAutoCleanup_Changed(object sender, RoutedEventArgs e)
-        {
-            if (!_isInitialized) return;
-            
-            _settings.AutoCleanupEnabled = chkAutoCleanup.IsChecked == true;
-            
-            if (_autoCleanupTimer != null)
-            {
-                if (_settings.AutoCleanupEnabled)
-                {
-                    _autoCleanupTimer.Start();
-                }
-                else
-                {
-                    _autoCleanupTimer.Stop();
-                }
-            }
-            
-            // Maak of verwijder de Windows scheduled task
-            UpdateScheduledTask();
-            
-            UpdateAutoCleanupInfo();
-            SaveSettings();
-        }
-
-        private void UpdateAutoCleanupInfo()
-        {
-            if (chkAutoCleanup.IsChecked == true)
-            {
-                txtAutoCleanupInfo.Visibility = Visibility.Visible;
-                
-                // Bepaal wanneer de volgende cleanup is
-                if (_settings.LastAutoCleanup?.Date == DateTime.Today)
-                {
-                    // Vandaag al uitgevoerd, morgen weer
-                    txtAutoCleanupInfo.Text = $"✓ Uitgevoerd om {_settings.LastAutoCleanup:HH:mm} • Volgende: morgen 02:00";
-                    txtAutoCleanupInfo.Foreground = FindResource("SuccessBrush") as System.Windows.Media.SolidColorBrush;
-                }
-                else
-                {
-                    // Nog niet uitgevoerd vandaag
-                    var now = DateTime.Now;
-                    string nextRunText = now.Hour < 2 ? "vannacht om 02:00" : "morgen om 02:00";
-                    
-                    txtAutoCleanupInfo.Text = $"⏱ Volgende opruiming: {nextRunText}";
-                    txtAutoCleanupInfo.Foreground = FindResource("TextSecondaryBrush") as System.Windows.Media.SolidColorBrush;
-                }
-            }
-            else
-            {
-                txtAutoCleanupInfo.Visibility = Visibility.Collapsed;
-            }
-        }
-
         private void BtnDecrease_Click(object sender, RoutedEventArgs e)
         {
             if (_isScanning) return;
@@ -828,6 +781,109 @@ namespace BackupCleaner
             customer.FilesToDelete = setsToDelete.Sum(s => s.Files.Count);
             customer.SizeToFree = setsToDelete.Sum(s => s.TotalSize);
         }
+
+        #region Sorteren
+
+        private void HeaderKlant_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            SortByColumn(SortColumn.Klant);
+        }
+
+        private void HeaderBackups_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            SortByColumn(SortColumn.Backups);
+        }
+
+        private void HeaderTeVerwijderen_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            SortByColumn(SortColumn.TeVerwijderen);
+        }
+
+        private void HeaderVrijTeMaken_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            SortByColumn(SortColumn.VrijTeMaken);
+        }
+
+        private void SortByColumn(SortColumn column)
+        {
+            if (_isScanning || _customers.Count == 0) return;
+
+            // Als dezelfde kolom wordt aangeklikt, wissel de richting
+            if (_currentSortColumn == column)
+            {
+                _sortAscending = !_sortAscending;
+            }
+            else
+            {
+                _currentSortColumn = column;
+                // Standaard sortering: Klant ascending, numerieke kolommen descending
+                _sortAscending = column == SortColumn.Klant;
+            }
+
+            // Sorteer de lijst
+            var sorted = _currentSortColumn switch
+            {
+                SortColumn.Klant => _sortAscending 
+                    ? _customers.OrderBy(c => c.FolderName).ToList()
+                    : _customers.OrderByDescending(c => c.FolderName).ToList(),
+                SortColumn.Backups => _sortAscending 
+                    ? _customers.OrderBy(c => c.TotalBackups).ToList()
+                    : _customers.OrderByDescending(c => c.TotalBackups).ToList(),
+                SortColumn.TeVerwijderen => _sortAscending 
+                    ? _customers.OrderBy(c => c.FilesToDelete).ToList()
+                    : _customers.OrderByDescending(c => c.FilesToDelete).ToList(),
+                SortColumn.VrijTeMaken => _sortAscending 
+                    ? _customers.OrderBy(c => c.SizeToFree).ToList()
+                    : _customers.OrderByDescending(c => c.SizeToFree).ToList(),
+                _ => _customers.ToList()
+            };
+
+            // Herlaad de lijst met gesorteerde items
+            _customers.Clear();
+            foreach (var customer in sorted)
+            {
+                _customers.Add(customer);
+            }
+
+            // Update visuele indicatoren
+            UpdateSortIndicators();
+        }
+
+        private void UpdateSortIndicators()
+        {
+            // Reset alle indicatoren
+            sortIndicatorKlant.Text = "";
+            sortIndicatorBackups.Text = "";
+            sortIndicatorTeVerwijderen.Text = "";
+            sortIndicatorVrijTeMaken.Text = "";
+
+            // Zet indicator voor actieve kolom
+            var indicator = _sortAscending ? " ▲" : " ▼";
+            switch (_currentSortColumn)
+            {
+                case SortColumn.Klant:
+                    sortIndicatorKlant.Text = indicator;
+                    break;
+                case SortColumn.Backups:
+                    sortIndicatorBackups.Text = indicator;
+                    break;
+                case SortColumn.TeVerwijderen:
+                    sortIndicatorTeVerwijderen.Text = indicator;
+                    break;
+                case SortColumn.VrijTeMaken:
+                    sortIndicatorVrijTeMaken.Text = indicator;
+                    break;
+            }
+        }
+
+        private void ResetSortState()
+        {
+            _currentSortColumn = SortColumn.None;
+            _sortAscending = true;
+            UpdateSortIndicators();
+        }
+
+        #endregion
 
         protected override void OnClosing(CancelEventArgs e)
         {

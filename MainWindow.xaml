@@ -35,11 +35,21 @@
                                Margin="0,4,0,0"/>
                 </StackPanel>
                 
-                <Button Grid.Column="1" 
-                        Content="📁 Map Wijzigen" 
-                        Click="BtnSelectFolder_Click"
-                        Style="{StaticResource PrimaryButtonStyle}"
-                        VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="⚙️ Instellingen" 
+                            Click="BtnSettings_Click"
+                            Background="Transparent"
+                            BorderBrush="{StaticResource SecondaryBrush}"
+                            BorderThickness="1"
+                            Foreground="{StaticResource SecondaryBrush}"
+                            Padding="12,8"
+                            Cursor="Hand"
+                            Margin="0,0,12,0"
+                            ToolTip="Open instellingen voor negeerlijst en automatisch opruimen"/>
+                    <Button Content="📁 Map Wijzigen" 
+                            Click="BtnSelectFolder_Click"
+                            Style="{StaticResource PrimaryButtonStyle}"/>
+                </StackPanel>
             </Grid>
         </Border>
 
@@ -68,29 +78,8 @@
                         Style="{StaticResource AccentButtonStyle}"
                         Margin="0,0,12,0"/>
                 
-                <StackPanel Grid.Column="2" Orientation="Vertical" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal">
-                        <CheckBox x:Name="chkAutoCleanup" 
-                                  Content="Automatisch dagelijks opruimen"
-                                  Style="{StaticResource ModernCheckBoxStyle}"
-                                  Checked="ChkAutoCleanup_Changed"
-                                  Unchecked="ChkAutoCleanup_Changed"/>
-                        <Button Content="📝 Negeerlijst" 
-                                Click="BtnOpenIgnoreFile_Click"
-                                Background="Transparent"
-                                BorderThickness="0"
-                                Foreground="{StaticResource SecondaryBrush}"
-                                Cursor="Hand"
-                                Margin="16,0,0,0"
-                                ToolTip="Open het bestand met genegeerde mappen/bestanden"/>
-                    </StackPanel>
-                    <TextBlock x:Name="txtAutoCleanupInfo" 
-                               Text="" 
-                               FontSize="12" 
-                               Foreground="{StaticResource TextSecondaryBrush}"
-                               Margin="30,4,0,0"
-                               Visibility="Collapsed"/>
-                </StackPanel>
+                <!-- Lege ruimte waar voorheen auto-cleanup stond -->
+                <StackPanel Grid.Column="2"/>
                 
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
                     <TextBlock Text="Min. leeftijd:" 
@@ -195,11 +184,56 @@
                               IsChecked="True"
                               Checked="ChkSelectAll_Changed"
                               Unchecked="ChkSelectAll_Changed"/>
-                    <TextBlock Grid.Column="1" Text="Klant" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}"/>
-                    <TextBlock Grid.Column="2" Text="Backups" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" TextAlignment="Center"/>
+                    
+                    <!-- Sorteerbare kolomheaders -->
+                    <TextBlock Grid.Column="1" 
+                               x:Name="headerKlant"
+                               FontWeight="SemiBold" 
+                               Foreground="{StaticResource SecondaryBrush}"
+                               Cursor="Hand"
+                               MouseLeftButtonDown="HeaderKlant_Click"
+                               ToolTip="Klik om te sorteren op klantnaam">
+                        <Run Text="Klant"/>
+                        <Run x:Name="sortIndicatorKlant" Text="" FontSize="10"/>
+                    </TextBlock>
+                    
+                    <TextBlock Grid.Column="2" 
+                               x:Name="headerBackups"
+                               FontWeight="SemiBold" 
+                               Foreground="{StaticResource SecondaryBrush}"
+                               TextAlignment="Center"
+                               Cursor="Hand"
+                               MouseLeftButtonDown="HeaderBackups_Click"
+                               ToolTip="Klik om te sorteren op aantal backups">
+                        <Run Text="Backups"/>
+                        <Run x:Name="sortIndicatorBackups" Text="" FontSize="10"/>
+                    </TextBlock>
+                    
                     <TextBlock Grid.Column="3" Text="Bewaren" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" TextAlignment="Center"/>
-                    <TextBlock Grid.Column="4" Text="Te verwijderen" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" TextAlignment="Center"/>
-                    <TextBlock Grid.Column="5" Text="Vrij te maken" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" TextAlignment="Center"/>
+                    
+                    <TextBlock Grid.Column="4" 
+                               x:Name="headerTeVerwijderen"
+                               FontWeight="SemiBold" 
+                               Foreground="{StaticResource SecondaryBrush}"
+                               TextAlignment="Center"
+                               Cursor="Hand"
+                               MouseLeftButtonDown="HeaderTeVerwijderen_Click"
+                               ToolTip="Klik om te sorteren op te verwijderen bestanden">
+                        <Run Text="Te verwijderen"/>
+                        <Run x:Name="sortIndicatorTeVerwijderen" Text="" FontSize="10"/>
+                    </TextBlock>
+                    
+                    <TextBlock Grid.Column="5" 
+                               x:Name="headerVrijTeMaken"
+                               FontWeight="SemiBold" 
+                               Foreground="{StaticResource SecondaryBrush}"
+                               TextAlignment="Center"
+                               Cursor="Hand"
+                               MouseLeftButtonDown="HeaderVrijTeMaken_Click"
+                               ToolTip="Klik om te sorteren op vrij te maken ruimte">
+                        <Run Text="Vrij te maken"/>
+                        <Run x:Name="sortIndicatorVrijTeMaken" Text="" FontSize="10"/>
+                    </TextBlock>
                 </Grid>
                 
                 <!-- List Content -->
