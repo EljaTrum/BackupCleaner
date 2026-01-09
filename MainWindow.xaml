@@ -315,7 +315,7 @@
                                         </Border>
                                         
                                         <TextBlock Grid.Column="4" 
-                                                   Text="{Binding BackupsToDeleteCount}" 
+                                                   Text="{Binding FilesToDelete}" 
                                                    TextAlignment="Center"
                                                    VerticalAlignment="Center"
                                                    Foreground="{StaticResource WarningBrush}"
