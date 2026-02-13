@@ -4,6 +4,8 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using BackupCleaner.Models;
 
 namespace BackupCleaner.Services
@@ -206,7 +208,7 @@ namespace BackupCleaner.Services
         }
 
         /// <summary>
-        /// Verwijder de bestanden daadwerkelijk
+        /// Verwijder de bestanden daadwerkelijk (synchroon, voor automatische opruiming)
         /// </summary>
         public static (int deletedFiles, long freedSpace, List<string> errors) DeleteFiles(List<FileToDelete> files)
         {
@@ -223,16 +225,80 @@ namespace BackupCleaner.Services
                         File.Delete(file.FilePath);
                         deletedCount++;
                         freedSpace += file.Size;
+                        LogService.Info($"Verwijderd: {file.FilePath} ({file.Size} bytes)");
                     }
                 }
                 catch (Exception ex)
                 {
-                    errors.Add($"Kon {file.FileName} niet verwijderen: {ex.Message}");
+                    var msg = $"Kon {file.FileName} niet verwijderen: {ex.Message}";
+                    errors.Add(msg);
+                    LogService.Warn(msg);
                 }
             }
 
             return (deletedCount, freedSpace, errors);
         }
+
+        /// <summary>
+        /// Verwijder de bestanden asynchroon met progress reporting
+        /// </summary>
+        public static async Task<(int deletedFiles, long freedSpace, List<string> errors)> DeleteFilesAsync(
+            List<FileToDelete> files,
+            IProgress<DeleteProgress>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            int deletedCount = 0;
+            long freedSpace = 0;
+            var errors = new List<string>();
+            var totalFiles = files.Count;
+
+            await Task.Run(() =>
+            {
+                for (int i = 0; i < files.Count; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var file = files[i];
+                    try
+                    {
+                        if (File.Exists(file.FilePath))
+                        {
+                            File.Delete(file.FilePath);
+                            deletedCount++;
+                            freedSpace += file.Size;
+                            LogService.Info($"Verwijderd: {file.FilePath} ({file.Size} bytes)");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        var msg = $"Kon {file.FileName} niet verwijderen: {ex.Message}";
+                        errors.Add(msg);
+                        LogService.Warn(msg);
+                    }
+
+                    progress?.Report(new DeleteProgress
+                    {
+                        CurrentFile = file.FileName,
+                        CurrentIndex = i + 1,
+                        TotalFiles = totalFiles,
+                        DeletedCount = deletedCount,
+                        FreedSpace = freedSpace
+                    });
+                }
+            }, cancellationToken);
+
+            return (deletedCount, freedSpace, errors);
+        }
+    }
+
+    public class DeleteProgress
+    {
+        public string CurrentFile { get; set; } = "";
+        public int CurrentIndex { get; set; }
+        public int TotalFiles { get; set; }
+        public int DeletedCount { get; set; }
+        public long FreedSpace { get; set; }
+        public int Percentage => TotalFiles > 0 ? (int)(CurrentIndex * 100.0 / TotalFiles) : 0;
     }
 }
 

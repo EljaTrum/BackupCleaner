@@ -610,7 +610,7 @@ namespace BackupCleaner
             PerformCleanup(isAutomatic: false);
         }
 
-        private void PerformCleanup(bool isAutomatic)
+        private async void PerformCleanup(bool isAutomatic)
         {
             var selectedCustomers = _customers.Where(c => c.IsSelected).ToList();
             if (!selectedCustomers.Any())
@@ -638,15 +638,17 @@ namespace BackupCleaner
                 return;
             }
 
-            // Toon preview venster
+            // Toon preview venster (verwijdering gebeurt nu in het preview venster)
             var previewWindow = new CleanupPreviewWindow(allFilesToDelete);
             previewWindow.Owner = this;
-            
+
             if (previewWindow.ShowDialog() == true)
             {
-                // Als de gebruiker bevestigt, verwijder de bestanden
-                var (deletedFiles, freedSpace, errors) = BackupService.DeleteFiles(allFilesToDelete);
-                
+                // Resultaten ophalen uit het preview venster
+                var deletedFiles = previewWindow.DeletedFiles;
+                var freedSpace = previewWindow.FreedSpace;
+                var errors = previewWindow.Errors;
+
                 if (errors.Any())
                 {
                     MessageBox.Show(
@@ -663,9 +665,19 @@ namespace BackupCleaner
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
                 }
-                
-                // Refresh de lijst
-                ScanFolders();
+
+                // Herbereken alleen de stats van de opgeruimde klanten (niet alles opnieuw scannen)
+                var affectedCustomerNames = allFilesToDelete.Select(f => f.CustomerName).Distinct().ToHashSet();
+                var affectedCustomers = _customers.Where(c => affectedCustomerNames.Contains(c.FolderName)).ToList();
+                var minAge = _minimumAgeMonths;
+
+                txtStatus.Text = "Statistieken bijwerken...";
+                foreach (var customer in affectedCustomers)
+                {
+                    await Task.Run(() => BackupService.CalculateStats(customer, minAge));
+                }
+                UpdateStats();
+                txtStatus.Text = "Gereed";
             }
         }
 
