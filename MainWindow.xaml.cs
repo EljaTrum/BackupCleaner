@@ -477,7 +477,8 @@ namespace BackupCleaner
                     {
                         FolderName = folderName,
                         FolderPath = dir,
-                        TotalBackups = backupSets.Count
+                        TotalBackups = backupSets.Count,
+                        CachedBackupSets = backupSets
                     };
 
                     // Herstel opgeslagen instellingen of markeer als nieuw
@@ -622,12 +623,23 @@ namespace BackupCleaner
                 return;
             }
 
-            var allFilesToDelete = new List<FileToDelete>();
-            foreach (var customer in selectedCustomers)
+            var previousStatus = txtStatus.Text;
+            txtStatus.Text = $"Bestanden ophalen voor {selectedCustomers.Count} klant(en)...";
+            btnCleanup.IsEnabled = false;
+
+            var minAge = _minimumAgeMonths;
+            var allFilesToDelete = await Task.Run(() =>
             {
-                var files = BackupService.GetFilesToDelete(customer, _minimumAgeMonths);
-                allFilesToDelete.AddRange(files);
-            }
+                var result = new List<FileToDelete>();
+                foreach (var customer in selectedCustomers)
+                {
+                    result.AddRange(BackupService.GetFilesToDelete(customer, minAge));
+                }
+                return result;
+            });
+
+            btnCleanup.IsEnabled = true;
+            txtStatus.Text = previousStatus;
 
             if (!allFilesToDelete.Any())
             {
@@ -669,12 +681,11 @@ namespace BackupCleaner
                 // Herbereken alleen de stats van de opgeruimde klanten (niet alles opnieuw scannen)
                 var affectedCustomerNames = allFilesToDelete.Select(f => f.CustomerName).Distinct().ToHashSet();
                 var affectedCustomers = _customers.Where(c => affectedCustomerNames.Contains(c.FolderName)).ToList();
-                var minAge = _minimumAgeMonths;
 
                 txtStatus.Text = "Statistieken bijwerken...";
                 foreach (var customer in affectedCustomers)
                 {
-                    await Task.Run(() => BackupService.CalculateStats(customer, minAge));
+                    await Task.Run(() => BackupService.CalculateStats(customer, minAge)); // minAge is gedefinieerd bovenaan de methode
                 }
                 UpdateStats();
                 txtStatus.Text = "Gereed";

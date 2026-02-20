@@ -157,7 +157,7 @@ namespace BackupCleaner.Services
         public static List<FileToDelete> GetFilesToDelete(CustomerFolder customer, int minimumAgeMonths = 0)
         {
             var filesToDelete = new List<FileToDelete>();
-            var backupSets = GetBackupSets(customer.FolderPath);
+            var backupSets = customer.CachedBackupSets ?? GetBackupSets(customer.FolderPath);
             var cutoffDate = DateTime.Today.AddMonths(-minimumAgeMonths);
 
             // Stap 1: Bepaal welke sets bewaard moeten blijven (de nieuwste X)
@@ -193,6 +193,7 @@ namespace BackupCleaner.Services
         public static void CalculateStats(CustomerFolder customer, int minimumAgeMonths = 0)
         {
             var backupSets = GetBackupSets(customer.FolderPath);
+            customer.CachedBackupSets = backupSets; // Cache bijwerken na hernieuwde scan
             customer.TotalBackups = backupSets.Count;
             
             var cutoffDate = DateTime.Today.AddMonths(-minimumAgeMonths);

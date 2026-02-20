@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
@@ -11,6 +12,9 @@ namespace BackupCleaner.Models
         private int _filesToDelete;
         private long _sizeToFree;
         private bool _isNew;
+
+        // Gecachede backup sets, gevuld tijdens ScanFolders en bijgewerkt na verwijdering
+        public List<BackupSet>? CachedBackupSets { get; set; }
 
         public string FolderName { get; set; } = string.Empty;
         public string FolderPath { get; set; } = string.Empty;
